@@ -1,19 +1,49 @@
-# Bereken 90% van het vrije RAM en pas de Java-argumenten aan voor Prism Launcher
+# ============================================
+# Prism Launcher RAM auto-toewijzingsscript
+# ============================================
 
-# Hoeveel RAM is vrij in MB
+# Instance-naam die Prism meegeeft
+$instanceName = $env:INST_NAME
+if (-not $instanceName) {
+    Write-Host "⚠️ Geen instance-naam gevonden via Prism, gebruik standaard 'default'."
+    $instanceName = "default"
+}
+
+# Pad naar de configuratie van deze instance
+$instancePath = Join-Path "$env:APPDATA\PrismLauncher\instances" $instanceName
+$configFile   = Join-Path $instancePath "instance.cfg"
+
+if (-not (Test-Path $configFile)) {
+    Write-Host "❌ Kon instance.cfg niet vinden op: $configFile"
+    exit 1
+}
+
+# Vrij geheugen in MB berekenen
 $freeRamMB = (Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1024
 
-# 90% van het vrije RAM
+# 90 % gebruiken, met grenzen
 $allocRamMB = [math]::Floor($freeRamMB * 0.9)
+if ($allocRamMB -lt 4096) { $allocRamMB = 4096 }    # minimaal 4 GB
+if ($allocRamMB -gt 16384) { $allocRamMB = 16384 }  # maximaal 16 GB
 
-# Bestand waar Prism zijn instellingen opslaat
-$settingsFile = "$env:APPDATA\PrismLauncher\instances\$env:INST_ID\instance.cfg"
+# Bestand aanpassen
+$content = Get-Content $configFile
+$newContent = @()
+$found = $false
+foreach ($line in $content) {
+    if ($line -match "^MaxMemAlloc=") {
+        $newContent += "MaxMemAlloc=$allocRamMB"
+        $found = $true
+    }
+    else {
+        $newContent += $line
+    }
+}
+if (-not $found) {
+    $newContent += "MaxMemAlloc=$allocRamMB"
+}
 
-# Oude waarden verwijderen en nieuwe toevoegen
-(Get-Content $settingsFile) |
-    Where-Object { $_ -notmatch "^MaxMemAlloc=" } |
-    Add-Content -Path $settingsFile -Encoding UTF8
+# Schrijf terug
+$newContent | Set-Content -Path $configFile -Encoding UTF8
 
-Add-Content -Path $settingsFile -Value "MaxMemAlloc=$allocRamMB" -Encoding UTF8
-
-Write-Host "RAM toewijzing ingesteld op $allocRamMB MB voor $env:INST_NAME"
+Write-Host "✅ RAM-toewijzing ingesteld op $allocRamMB MB voor $instanceName"
